@@ -58,7 +58,7 @@
     },
     {
         "XIDyn": {
-            "mode": "2x2_single_column",
+            "mode": "2x2_triple_column",
             "update_config": false,
             "dpdk_process_rank": 0,
             "num_secondary_processes": 0,
@@ -114,7 +114,7 @@
                     "datatype": "uint16",
                     "dims": [
                         288,
-                        128
+                        384
                     ],
                     "compression": "none"
                 }
