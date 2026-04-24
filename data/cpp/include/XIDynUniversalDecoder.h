@@ -21,6 +21,8 @@
 
 // Mode enumeration
 enum class XIDynMode {
+    XIDYN_1X1_SINGLE_CHIP_COLUMN,
+    XIDYN_1X1_SINGLE_CHIP,
     XIDYN_2X2_SINGLE_COLUMN,
     XIDYN_2X2_DOUBLE_COLUMN,
     XIDYN_2X2_TRIPLE_COLUMN
@@ -70,12 +72,14 @@ public:
     // String to mode mapping
     static const std::map<std::string, XIDynMode>& get_mode_string_map() {
         static const std::map<std::string, XIDynMode> mode_string_map = {
+            {"1x1_single_chip_column", XIDynMode::XIDYN_1X1_SINGLE_CHIP_COLUMN},
+            {"1x1_single_chip", XIDynMode::XIDYN_1X1_SINGLE_CHIP},
             {"2x2_single_column", XIDynMode::XIDYN_2X2_SINGLE_COLUMN},
             {"2x2_double_column", XIDynMode::XIDYN_2X2_DOUBLE_COLUMN},
             {"2x2_triple_column", XIDynMode::XIDYN_2X2_TRIPLE_COLUMN}
         };
         return mode_string_map;
-    }
+    };
     
     // Constructor
     XIDynUniversalDecoder(XIDynMode initial_mode = XIDynMode::XIDYN_2X2_SINGLE_COLUMN) :
@@ -103,6 +107,8 @@ public:
     
     std::string get_mode_string() const {
         static const std::map<XIDynMode, std::string> mode_to_string = {
+            {XIDynMode::XIDYN_1X1_SINGLE_CHIP_COLUMN, "1x1_single_column_chip"},
+            {XIDynMode::XIDYN_1X1_SINGLE_CHIP, "1x1_single_chip"},
             {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, "2x2_single_column"},
             {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, "2x2_double_column"},
             {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, "2x2_triple_column"}
@@ -239,10 +245,12 @@ private:
     // Mode configurations
     static const std::map<XIDynMode, ModeConfiguration>& get_mode_configs() {
         static const std::map<XIDynMode, ModeConfiguration> mode_configs = {
-            //                                   packets  payload  chunk  bit_depth                           reorder  x    y   columns
-            {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, {9,       8192,    1,     FrameProcessor::DataType::raw_16bit, true, 128, 288, 1}},
-            {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, {18,      8192,    1,     FrameProcessor::DataType::raw_16bit, true, 256, 288, 2}},
-            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, true, 384, 288, 3}},
+            //                                   packets  payload  chunk  bit_depth                           reorder   x    y   columns
+            {XIDynMode::XIDYN_1X1_SINGLE_CHIP_COLUMN, {2,  4608,    1,     FrameProcessor::DataType::raw_16bit, false, 32,  144, 1}},
+            {XIDynMode::XIDYN_1X1_SINGLE_CHIP,   {8,       6912,    1,     FrameProcessor::DataType::raw_16bit, false, 192, 144, 1}},
+            {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, {9,       8192,    1,     FrameProcessor::DataType::raw_16bit, true,  128, 288, 1}},
+            {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, {18,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,  256, 288, 2}},
+            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, false,  384, 288, 3}},
 
         };
         return mode_configs;
