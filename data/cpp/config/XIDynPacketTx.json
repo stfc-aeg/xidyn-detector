@@ -24,6 +24,7 @@
     },
     {
         "XIDyn": {
+            "mode": "2x2_triple_column",
             "update_config": false,
             "dpdk_process_rank": 0,
             "num_secondary_processes": 0,
@@ -46,7 +47,7 @@
                     "destination_mac_address": "9c:63:c0:db:bb:dc",
 
                     "number_of_frames": 2000,
-                    "test_pattern_mode": 1
+                    "test_pattern_mode": "numerical-incremental"
 
                 }
             }

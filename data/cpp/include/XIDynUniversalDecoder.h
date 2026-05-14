@@ -1,8 +1,8 @@
 /*
  * XIDynDecoder.h
  *
- *  Created on: 12 September 2024
- *      Author: Dominic Banks, STFC Detector Systems Software Group
+ *  Created on: 10 March 2026
+ *      Author: William Brown, STFC Detector Systems Software Group
  */
 
 #ifndef INCLUDE_XIDYN_UNIVERSAL_DECODER_H_
@@ -201,6 +201,18 @@ public:
     const uint32_t get_packet_number(PacketHeader* packet_hdr) const {
         return reinterpret_cast<X10GPacketHeader*>(packet_hdr)->packet_number;
     }
+
+    bool set_packet_number(PacketHeader* packet_hdr, uint32_t packet_number) {
+        X10GPacketHeader* x10g_hdr = reinterpret_cast<X10GPacketHeader*>(packet_hdr);
+        x10g_hdr->packet_number = packet_number;
+        return true;
+    }
+
+    bool set_packet_frame_number(PacketHeader* packet_hdr, rte_be64_t frame_number) {
+        X10GPacketHeader* x10g_hdr = reinterpret_cast<X10GPacketHeader*>(packet_hdr);
+        x10g_hdr->frame_number = frame_number;
+        return true;
+    }
     
     // Frame reordering
     SuperFrameHeader* reorder_frame(SuperFrameHeader* frame_hdr, SuperFrameHeader* reordered_frame) {
@@ -250,7 +262,7 @@ private:
             {XIDynMode::XIDYN_1X1_SINGLE_CHIP,   {8,       6912,    1,     FrameProcessor::DataType::raw_16bit, false, 192, 144, 1}},
             {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, {9,       8192,    1,     FrameProcessor::DataType::raw_16bit, true,  128, 288, 1}},
             {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, {18,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,  256, 288, 2}},
-            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, false,  384, 288, 3}},
+            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,  384, 288, 3}},
 
         };
         return mode_configs;
@@ -280,9 +292,9 @@ private:
         uint16_t* packed_data = reinterpret_cast<uint16_t*>(get_image_data_start(frame_hdr));
         uint16_t* output_memory = reinterpret_cast<uint16_t*>(get_image_data_start(reordered_frame));
 
-        int packets_per_column = 9;
-        int rows_per_packet = 32;
-        int pixels_per_row = 128;
+        int packets_per_column = mode_config_.packets_per_frame / mode_config_.columns; //packets / column
+        int rows_per_packet = frame_y_resolution_ / (mode_config_.packets_per_frame / mode_config_.columns);
+        int pixels_per_row = frame_x_resolution_ / mode_config_.columns;
         int pixels_per_packet = rows_per_packet * pixels_per_row; // 4096
         int pixels_per_column = packets_per_column * pixels_per_packet; // 36864
 
@@ -292,29 +304,32 @@ private:
                     for (int row = 0; row < rows_per_packet; row++) {
                         uint16_t* input_memory_row =
                             (packed_data) + (column * pixels_per_column) +
-                            (packet * pixels_per_packet) + (row * pixels_per_row);
+                            (packet * pixels_per_packet) + (row * pixels_per_row)
+                            + (frame * get_frame_data_size());
 
                         if (row % 2 == 0) {
 
                             uint16_t* output_memory_top_row = 
                                 (output_memory) + (pixels_per_row * column) + 
                                 (packet * mode_config_.columns * (pixels_per_packet / 2)) +
-                                ((row / 2) * (pixels_per_row * mode_config_.columns));
+                                ((row / 2) * (pixels_per_row * mode_config_.columns))
+                                + (frame * get_frame_data_size());
 
-                            for (int pixel = 0; pixel < pixels_per_row; pixel++) {
-                                output_memory_top_row[pixel] = input_memory_row[pixel];
-                            };
+                            rte_memcpy(output_memory_top_row,
+                                    input_memory_row,
+                                    pixels_per_row * sizeof(uint16_t));
 
                         } else {
 
                             uint16_t* output_memory_bottom_row =
                                 (output_memory) + ((pixels_per_column - pixels_per_row) * (mode_config_.columns)) +
                                 (pixels_per_row * column) - (packet * ((pixels_per_packet / 2) * mode_config_.columns)) -
-                                ((row / 2) * (pixels_per_row * mode_config_.columns));
+                                ((row / 2) * (pixels_per_row * mode_config_.columns))
+                                + (frame * get_frame_data_size());
 
-                            for (int pixel = 0; pixel < pixels_per_row; pixel++) {
-                                output_memory_bottom_row[pixel] = input_memory_row[pixel];
-                            }
+                            rte_memcpy(output_memory_bottom_row,
+                                    input_memory_row,
+                                    pixels_per_row * sizeof(uint16_t));
                         }
                     }
                 }
