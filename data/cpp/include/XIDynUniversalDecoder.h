@@ -25,7 +25,9 @@ enum class XIDynMode {
     XIDYN_1X1_SINGLE_CHIP,
     XIDYN_2X2_SINGLE_COLUMN,
     XIDYN_2X2_DOUBLE_COLUMN,
-    XIDYN_2X2_TRIPLE_COLUMN
+    XIDYN_2X2_TRIPLE_COLUMN,
+    XIDYN_2X2_32_BIT,
+    XIDYN_2X2_2X16_BIT
 };
 
 // Configuration for each mode
@@ -76,7 +78,9 @@ public:
             {"1x1_single_chip", XIDynMode::XIDYN_1X1_SINGLE_CHIP},
             {"2x2_single_column", XIDynMode::XIDYN_2X2_SINGLE_COLUMN},
             {"2x2_double_column", XIDynMode::XIDYN_2X2_DOUBLE_COLUMN},
-            {"2x2_triple_column", XIDynMode::XIDYN_2X2_TRIPLE_COLUMN}
+            {"2x2_triple_column", XIDynMode::XIDYN_2X2_TRIPLE_COLUMN},
+            {"2x2_32_bit", XIDynMode::XIDYN_2X2_32_BIT},
+            {"2x2_16x2_bit", XIDynMode::XIDYN_2X2_2X16_BIT}
         };
         return mode_string_map;
     };
@@ -111,7 +115,9 @@ public:
             {XIDynMode::XIDYN_1X1_SINGLE_CHIP, "1x1_single_chip"},
             {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, "2x2_single_column"},
             {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, "2x2_double_column"},
-            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, "2x2_triple_column"}
+            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, "2x2_triple_column"},
+            {XIDynMode::XIDYN_2X2_32_BIT, "2x2_32_bit"},
+            {XIDynMode::XIDYN_2X2_2X16_BIT, "2x2_16x2_bit"}
         };
         
         auto it = mode_to_string.find(current_mode_);
@@ -217,6 +223,9 @@ public:
     // Frame reordering
     SuperFrameHeader* reorder_frame(SuperFrameHeader* frame_hdr, SuperFrameHeader* reordered_frame) {
         if (mode_config_.needs_reordering) {
+            if (current_mode_ == XIDynMode::XIDYN_2X2_32_BIT) {
+                return reorder_2x2_32_bit_mode(frame_hdr, reordered_frame);
+            }
             return reorder_2x2_column_mode(frame_hdr, reordered_frame);
         }
         
@@ -257,13 +266,14 @@ private:
     // Mode configurations
     static const std::map<XIDynMode, ModeConfiguration>& get_mode_configs() {
         static const std::map<XIDynMode, ModeConfiguration> mode_configs = {
-            //                                   packets  payload  chunk  bit_depth                           reorder   x    y   columns
-            {XIDynMode::XIDYN_1X1_SINGLE_CHIP_COLUMN, {2,  4608,    1,     FrameProcessor::DataType::raw_16bit, false, 32,  144, 1}},
-            {XIDynMode::XIDYN_1X1_SINGLE_CHIP,   {8,       6912,    1,     FrameProcessor::DataType::raw_16bit, false, 192, 144, 1}},
-            {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, {9,       8192,    1,     FrameProcessor::DataType::raw_16bit, true,  128, 288, 1}},
-            {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, {18,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,  256, 288, 2}},
-            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,  384, 288, 3}},
-
+            //                                   packets   payload  chunk   bit_depth                           reorder   x    y   columns
+            {XIDynMode::XIDYN_1X1_SINGLE_CHIP_COLUMN, {2,  4608,    1,     FrameProcessor::DataType::raw_16bit, false,    32,  144, 1}},
+            {XIDynMode::XIDYN_1X1_SINGLE_CHIP,   {8,       6912,    1,     FrameProcessor::DataType::raw_16bit, false,    192, 144, 1}},
+            {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, {9,       8192,    1,     FrameProcessor::DataType::raw_16bit, true,     128, 288, 1}},
+            {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, {18,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,     256, 288, 2}},
+            {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,     384, 288, 3}},
+            {XIDynMode::XIDYN_2X2_32_BIT,        {54,      8192,    1,     FrameProcessor::DataType::raw_32bit, true,     384, 288, 3}},
+            {XIDynMode::XIDYN_2X2_2X16_BIT,      {54,      8192,    1,     FrameProcessor::DataType::raw_16bit, false,     384, 576, 3}}
         };
         return mode_configs;
     }
@@ -298,7 +308,7 @@ private:
         int pixels_per_packet = rows_per_packet * pixels_per_row; // 4096
         int pixels_per_column = packets_per_column * pixels_per_packet; // 36864
 
-        for (int frame = 0; frame < frames_per_super_frame_; frame++) {
+        for (int frame = 0; frame < 2; frame++) {
             for (int column = 0; column < mode_config_.columns; column++) {
                 for (int packet = 0; packet < packets_per_column; packet++) {
                     for (int row = 0; row < rows_per_packet; row++) {
@@ -330,6 +340,92 @@ private:
                             rte_memcpy(output_memory_bottom_row,
                                     input_memory_row,
                                     pixels_per_row * sizeof(uint16_t));
+                        }
+                    }
+                }
+            }
+        }
+        
+        return reordered_frame;
+    }
+
+    SuperFrameHeader* reorder_2x2_32_bit_mode(SuperFrameHeader* frame_hdr, SuperFrameHeader* reordered_frame) {
+        // Copy the header
+        rte_memcpy(reordered_frame, frame_hdr, 
+                   get_super_frame_header_size() +
+                   (get_frame_header_size() * frames_per_super_frame_));
+        
+        // Get pointers to the pixel data
+        uint16_t* packed_data = reinterpret_cast<uint16_t*>(get_image_data_start(frame_hdr));
+        uint32_t* output_memory = reinterpret_cast<uint32_t*>(get_image_data_start(reordered_frame));
+
+        int packets_per_column = 9; // mode_config_.packets_per_frame / (mode_config_.columns * 2); //packets per column
+        int rows_per_packet = 32; // frame_y_resolution_ / (mode_config_.packets_per_frame / (mode_config_.columns * 2));
+        int pixels_per_row = 128; // frame_x_resolution_ / mode_config_.columns;
+        int pixels_per_packet = rows_per_packet * pixels_per_row; // 4096
+        int pixels_per_column = packets_per_column * pixels_per_packet; // 36864
+
+        uint16_t* old_input = nullptr;
+
+        for (int frame = 0; frame < frames_per_super_frame_; frame++) {
+            for (int column = 0; column < mode_config_.columns; column++) {
+                for (int packet = 0; packet < packets_per_column; packet++) {
+                    for (int row = 0; row < rows_per_packet; row++) {
+                        uint16_t* input_memory_row =
+                            (packed_data) + (column * pixels_per_column) +
+                            (packet * pixels_per_packet) + (row * pixels_per_row)
+                            + (frame * get_frame_data_size());
+                        // std::cout << "ROW VAL" << row << std::endl;
+
+                        // if (input_memory_row[0] == 0)
+                        // {
+                        //     std::cout << "VAL = 0, ROW = " << row << std::endl;
+                        // }
+
+                        if (row % 2 == 0) {
+                            uint32_t* output_memory_pixel =
+                                output_memory + (pixels_per_row * column) + 
+                                (packet * mode_config_.columns * (pixels_per_packet / 2)) +
+                                ((row / 2) * (pixels_per_row * mode_config_.columns))
+                                + (frame * get_frame_data_size());
+                            for (int pixel = 0; pixel < pixels_per_row; pixel++)
+                            {
+                                uint16_t lower_16_bit = input_memory_row[pixel];
+                                uint16_t higher_16_bit = input_memory_row[pixel + 110592];
+
+                                output_memory_pixel[pixel] = //lower_16_bit;
+                                    (static_cast<uint32_t>(higher_16_bit) << 16) |
+                                    static_cast<uint32_t>(lower_16_bit);
+                            }
+
+                            // rte_memcpy(output_memory_top_row,
+                            //         input_memory_row,
+                            //         pixels_per_row * sizeof(uint16_t));
+
+                        } else {
+                            uint32_t* output_memory_pixel =
+                                output_memory + ((pixels_per_column - pixels_per_row) * (mode_config_.columns)) +
+                                (pixels_per_row * column) - (packet * ((pixels_per_packet / 2) * mode_config_.columns)) -
+                                ((row / 2) * (pixels_per_row * mode_config_.columns))
+                                + (frame * get_frame_data_size());
+                            
+                            for (int pixel = 0; pixel < pixels_per_row; pixel++)
+                            {
+
+
+                                uint16_t lower_16_bit = input_memory_row[pixel];
+                                uint16_t higher_16_bit = input_memory_row[pixel + 110592];
+
+                                output_memory_pixel[pixel] = // lower_16_bit;
+                                    (static_cast<uint32_t>(higher_16_bit) << 16) |
+                                    static_cast<uint32_t>(lower_16_bit);
+                            }
+
+                            
+
+                            // rte_memcpy(output_memory_bottom_row,
+                            //         input_memory_row,
+                            //         pixels_per_row * sizeof(uint16_t));
                         }
                     }
                 }
