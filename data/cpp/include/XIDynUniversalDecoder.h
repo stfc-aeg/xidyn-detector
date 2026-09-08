@@ -27,7 +27,8 @@ enum class XIDynMode {
     XIDYN_2X2_DOUBLE_COLUMN,
     XIDYN_2X2_TRIPLE_COLUMN,
     XIDYN_2X2_32_BIT,
-    XIDYN_2X2_2X16_BIT
+    XIDYN_2X2_2X16_BIT,
+    TEST_8_BIT
 };
 
 // Configuration for each mode
@@ -72,15 +73,15 @@ class XIDynUniversalDecoder : public PacketProtocolDecoder
 {
 public:
     // String to mode mapping
-    static const std::map<std::string, XIDynMode>& get_mode_string_map() {
+    static const std::map<std::string, XIDynMode>& get_mode_string_map()
+    {
         static const std::map<std::string, XIDynMode> mode_string_map = {
             {"1x1_single_chip_column", XIDynMode::XIDYN_1X1_SINGLE_CHIP_COLUMN},
             {"1x1_single_chip", XIDynMode::XIDYN_1X1_SINGLE_CHIP},
             {"2x2_single_column", XIDynMode::XIDYN_2X2_SINGLE_COLUMN},
             {"2x2_double_column", XIDynMode::XIDYN_2X2_DOUBLE_COLUMN},
             {"2x2_triple_column", XIDynMode::XIDYN_2X2_TRIPLE_COLUMN},
-            {"2x2_32_bit", XIDynMode::XIDYN_2X2_32_BIT},
-            {"2x2_16x2_bit", XIDynMode::XIDYN_2X2_2X16_BIT}
+            {"2x2_32_bit", XIDynMode::XIDYN_2X2_32_BIT}
         };
         return mode_string_map;
     };
@@ -116,8 +117,7 @@ public:
             {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, "2x2_single_column"},
             {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, "2x2_double_column"},
             {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, "2x2_triple_column"},
-            {XIDynMode::XIDYN_2X2_32_BIT, "2x2_32_bit"},
-            {XIDynMode::XIDYN_2X2_2X16_BIT, "2x2_16x2_bit"}
+            {XIDynMode::XIDYN_2X2_32_BIT, "2x2_32_bit"}
         };
         
         auto it = mode_to_string.find(current_mode_);
@@ -125,7 +125,7 @@ public:
     }
     
     // Override virtual functions from PacketProtocolDecoder
-    virtual const std::size_t get_frame_header_size(void) const {
+    virtual const std::size_t get_frame_header_size(const std::string& mode = "") const override {
         std::size_t packet_marker_size = sizeof(X10GRawFrameHeader().packet_state);
         std::size_t packet_header_size = sizeof(X10GRawFrameHeader) +
             (packet_marker_size * packets_per_frame_ - 1);
@@ -219,6 +219,23 @@ public:
         x10g_hdr->frame_number = frame_number;
         return true;
     }
+
+    void* prepare_frame(void* raw_frame, void* prepared_frame)
+    {
+        if (current_mode_ == XIDynMode::XIDYN_2X2_32_BIT) {
+            return prepare_2x2_32_bit_mode(raw_frame, prepared_frame);
+        }
+
+        if (mode_config_.needs_reordering) {
+            return prepare_2x2_column_mode(raw_frame, prepared_frame);
+        }
+
+        // For modes that don't need preparation, just copy the frame
+        rte_memcpy(prepared_frame, raw_frame,
+                   get_frame_x_resolution() * get_frame_y_resolution() * sizeof(uint16_t));
+
+        return prepared_frame;
+    }
     
     // Frame reordering
     SuperFrameHeader* reorder_frame(SuperFrameHeader* frame_hdr, SuperFrameHeader* reordered_frame) {
@@ -251,7 +268,7 @@ public:
     }
     
     // Frame dimension methods
-    virtual std::vector<std::size_t> get_frame_dimensions(void) const override {
+    virtual std::vector<std::size_t> get_frame_dimensions(const std::string& mode = "") const override {
         std::vector<std::size_t> dims;
         dims.push_back(frame_y_resolution_);
         dims.push_back(frame_x_resolution_);
@@ -272,8 +289,7 @@ private:
             {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, {9,       8192,    1,     FrameProcessor::DataType::raw_16bit, true,     128, 288, 1}},
             {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, {18,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,     256, 288, 2}},
             {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,     384, 288, 3}},
-            {XIDynMode::XIDYN_2X2_32_BIT,        {54,      8192,    1,     FrameProcessor::DataType::raw_32bit, true,     384, 288, 3}},
-            {XIDynMode::XIDYN_2X2_2X16_BIT,      {54,      8192,    1,     FrameProcessor::DataType::raw_16bit, false,     384, 576, 3}}
+            {XIDynMode::XIDYN_2X2_32_BIT,        {54,      8192,    1,     FrameProcessor::DataType::raw_32bit, true,     384, 288, 3}}
         };
         return mode_configs;
     }
@@ -290,6 +306,128 @@ private:
         // Frame dimensions are fixed for all modes
         frame_x_resolution_ = mode_config_.x_dimension;
         frame_y_resolution_ = mode_config_.y_dimension;
+    }
+
+    void* prepare_2x2_column_mode(void* raw_frame, void* prepared_frame)
+    {
+        uint16_t* raw = static_cast<uint16_t*>(raw_frame);
+        uint16_t* prepared = static_cast<uint16_t*>(prepared_frame);
+
+        const int packets_per_column = mode_config_.packets_per_frame / mode_config_.columns;
+        const int rows_per_packet = 32;
+        const int pixels_per_column_row = mode_config_.x_dimension / mode_config_.columns;
+        const int source_row_stride = frame_x_resolution_;
+        const int pixels_per_packet = rows_per_packet * pixels_per_column_row;
+        const int pixels_per_column = packets_per_column * pixels_per_packet;
+
+        for (int column = 0; column < mode_config_.columns; column++)
+        {
+            for (int packet = 0; packet < packets_per_column; packet++)
+            {
+                uint16_t* output_packet =
+                    prepared + column * pixels_per_column
+                    + packet * pixels_per_packet;
+
+                for (int row = 0; row < rows_per_packet; row++)
+                {
+                    uint16_t* output_row =
+                        output_packet + row * pixels_per_column_row;
+
+                    const uint16_t* input_row;
+
+                    if ((row & 1) == 0)
+                    {
+                        input_row =
+                            raw + (((row + packet * rows_per_packet) / 2)
+                            * source_row_stride)
+                            + column * pixels_per_column_row;
+                    }
+                    else
+                    {
+                        input_row =
+                            raw + ((frame_y_resolution_ - 1
+                            - ((row + packet * rows_per_packet) / 2))
+                            * source_row_stride)
+                            + column * pixels_per_column_row;
+                    }
+
+                    rte_memcpy(
+                        output_row,
+                        input_row,
+                        pixels_per_column_row * sizeof(uint16_t)
+                    );
+                }
+            }
+        }
+
+        return prepared_frame;
+    }
+
+    void* prepare_2x2_32_bit_mode(void* raw_frame, void* prepared_frame)
+    {
+        uint32_t* raw = static_cast<uint32_t*>(raw_frame);
+        uint16_t* prepared = static_cast<uint16_t*>(prepared_frame);
+
+        const int packets_per_column = 9;
+        const int rows_per_packet = 32;
+        const int pixels_per_row = 128;
+        const int pixels_per_packet = rows_per_packet * pixels_per_row;
+        const int pixels_per_column = packets_per_column * pixels_per_packet;
+
+        // The first 16-bit image contains the lower 16 bits.
+        // The second 16-bit image contains the upper 16 bits.
+        const int second_16bit_frame_offset = frame_x_resolution_ * frame_y_resolution_;
+
+        for (int column = 0; column < mode_config_.columns; column++)
+        {
+            for (int packet = 0; packet < packets_per_column; packet++)
+            {
+                for (int row = 0; row < rows_per_packet; row++)
+                {
+                    uint32_t* input_memory_row;
+
+                    if (row % 2 == 0)
+                    {
+                        input_memory_row =
+                            raw
+                            + (pixels_per_row * column)
+                            + (packet * mode_config_.columns * (pixels_per_packet / 2))
+                            + ((row / 2) * (pixels_per_row * mode_config_.columns));
+                    }
+                    else
+                    {
+                        input_memory_row =
+                            raw
+                            + ((pixels_per_column - pixels_per_row) * mode_config_.columns)
+                            + (pixels_per_row * column)
+                            - (packet * ((pixels_per_packet / 2) * mode_config_.columns))
+                            - ((row / 2) * (pixels_per_row * mode_config_.columns));
+                    }
+
+                    uint16_t* output_memory_row =
+                        prepared
+                        + (column * pixels_per_column)
+                        + (packet * pixels_per_packet)
+                        + (row * pixels_per_row);
+
+                    uint16_t* output_memory_row_upper =
+                        output_memory_row + second_16bit_frame_offset;
+
+                    for (int pixel = 0; pixel < pixels_per_row; pixel++)
+                    {
+                        const uint32_t pixel_value = input_memory_row[pixel];
+
+                        output_memory_row[pixel] =
+                            static_cast<uint16_t>(pixel_value & 0xFFFF);
+
+                        output_memory_row_upper[pixel] =
+                            static_cast<uint16_t>((pixel_value >> 16) & 0xFFFF);
+                    }
+                }
+            }
+        }
+
+        return prepared_frame;
     }
     
     SuperFrameHeader* reorder_2x2_column_mode(SuperFrameHeader* frame_hdr, SuperFrameHeader* reordered_frame) {
@@ -375,12 +513,6 @@ private:
                             (packed_data) + (column * pixels_per_column) +
                             (packet * pixels_per_packet) + (row * pixels_per_row)
                             + (frame * get_frame_data_size());
-                        // std::cout << "ROW VAL" << row << std::endl;
-
-                        // if (input_memory_row[0] == 0)
-                        // {
-                        //     std::cout << "VAL = 0, ROW = " << row << std::endl;
-                        // }
 
                         if (row % 2 == 0) {
                             uint32_t* output_memory_pixel =
@@ -398,10 +530,6 @@ private:
                                     static_cast<uint32_t>(lower_16_bit);
                             }
 
-                            // rte_memcpy(output_memory_top_row,
-                            //         input_memory_row,
-                            //         pixels_per_row * sizeof(uint16_t));
-
                         } else {
                             uint32_t* output_memory_pixel =
                                 output_memory + ((pixels_per_column - pixels_per_row) * (mode_config_.columns)) +
@@ -411,8 +539,6 @@ private:
                             
                             for (int pixel = 0; pixel < pixels_per_row; pixel++)
                             {
-
-
                                 uint16_t lower_16_bit = input_memory_row[pixel];
                                 uint16_t higher_16_bit = input_memory_row[pixel + 110592];
 
@@ -420,18 +546,11 @@ private:
                                     (static_cast<uint32_t>(higher_16_bit) << 16) |
                                     static_cast<uint32_t>(lower_16_bit);
                             }
-
-                            
-
-                            // rte_memcpy(output_memory_bottom_row,
-                            //         input_memory_row,
-                            //         pixels_per_row * sizeof(uint16_t));
                         }
                     }
                 }
             }
         }
-        
         return reordered_frame;
     }
 };

@@ -73,12 +73,19 @@
             "worker_cores": {
                 "packet_rx": {
                     "core_name": "PacketRxCore",
-                    "num_cores": 1,
-                    "pcie_device": ["0000:2a:00.0"],
-                    "rx_ports": [
-                        1234
+                    "num_cores": 2,
+                    "pcie_device": [
+                        "0000:2a:00.0",
+                        "0000:2a:00.1"
                     ],
-                    "device_ip": ["10.0.100.6"],
+                    "device_ip": [
+                        "10.0.100.10",
+                        "10.0.100.11"
+                    ],
+                    "rx_ports": [
+                        1234,
+                        61649
+                    ],
                     "rx_burst_size": 128,
                     "fwd_ring_size": 131072,
                     "release_ring_size": 131072,
@@ -90,18 +97,28 @@
                 "packet_processor": {
                     "core_name": "PacketProcessorCore",
                     "num_cores": 2,
+                    "stream": "primary",
+                    "mode": "2x2_double_column",
                     "connect": "packet_rx",
+                    "rx_ports": [
+                        1234,
+                        61649
+                    ],
                     "frame_timeout": 1000
                 },
                 "frame_builder": {
                     "core_name": "FrameBuilderCore",
                     "num_cores": 2,
+                    "stream": "primary",
+                    "mode": "2x2_double_column",
                     "connect": "packet_processor",
                     "secondary_fanout": false
                 },
                 "frame_wrapper": {
                     "core_name": "FrameWrapperCore",
                     "num_cores": 1,
+                    "stream": "primary",
+                    "mode": "2x2_double_column",
                     "connect": "frame_builder"
                 }
             }
