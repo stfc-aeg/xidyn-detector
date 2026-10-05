@@ -27,8 +27,8 @@ enum class XIDynMode {
     XIDYN_2X2_DOUBLE_COLUMN,
     XIDYN_2X2_TRIPLE_COLUMN,
     XIDYN_2X2_32_BIT,
-    XIDYN_2X2_2X16_BIT,
-    TEST_8_BIT
+    XIDYN_2X2_32_BIT_PG,
+    XIDYN_2X2_TRIPLE_ROW
 };
 
 // Configuration for each mode
@@ -81,7 +81,9 @@ public:
             {"2x2_single_column", XIDynMode::XIDYN_2X2_SINGLE_COLUMN},
             {"2x2_double_column", XIDynMode::XIDYN_2X2_DOUBLE_COLUMN},
             {"2x2_triple_column", XIDynMode::XIDYN_2X2_TRIPLE_COLUMN},
-            {"2x2_32_bit", XIDynMode::XIDYN_2X2_32_BIT}
+            {"2x2_32_bit", XIDynMode::XIDYN_2X2_32_BIT},
+            {"2x2_32_bit_pg", XIDynMode::XIDYN_2X2_32_BIT_PG},
+            {"2x2_triple_row", XIDynMode::XIDYN_2X2_TRIPLE_ROW}
         };
         return mode_string_map;
     };
@@ -117,7 +119,9 @@ public:
             {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, "2x2_single_column"},
             {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, "2x2_double_column"},
             {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, "2x2_triple_column"},
-            {XIDynMode::XIDYN_2X2_32_BIT, "2x2_32_bit"}
+            {XIDynMode::XIDYN_2X2_32_BIT, "2x2_32_bit"},
+            {XIDynMode::XIDYN_2X2_32_BIT_PG, "2x2_32_bit_pg"},
+            {XIDynMode::XIDYN_2X2_TRIPLE_ROW, "2x2_triple_row"}
         };
         
         auto it = mode_to_string.find(current_mode_);
@@ -231,14 +235,20 @@ public:
         }
 
         // For modes that don't need preparation, just copy the frame
-        rte_memcpy(prepared_frame, raw_frame,
-                   get_frame_x_resolution() * get_frame_y_resolution() * sizeof(uint16_t));
+        uint16_t* raw = static_cast<uint16_t*>(raw_frame);
+        uint16_t* prepared = static_cast<uint16_t*>(prepared_frame);
+
+        rte_memcpy(prepared, raw,
+                get_frame_x_resolution() *
+                get_frame_y_resolution() *
+                sizeof(uint16_t));
 
         return prepared_frame;
     }
     
     // Frame reordering
     SuperFrameHeader* reorder_frame(SuperFrameHeader* frame_hdr, SuperFrameHeader* reordered_frame) {
+
         if (mode_config_.needs_reordering) {
             if (current_mode_ == XIDynMode::XIDYN_2X2_32_BIT) {
                 return reorder_2x2_32_bit_mode(frame_hdr, reordered_frame);
@@ -283,13 +293,15 @@ private:
     // Mode configurations
     static const std::map<XIDynMode, ModeConfiguration>& get_mode_configs() {
         static const std::map<XIDynMode, ModeConfiguration> mode_configs = {
-            //                                   packets   payload  chunk   bit_depth                           reorder   x    y   columns
+            //                                   packets   payload  chunk   bit_depth                           reorder   x    y    columns
             {XIDynMode::XIDYN_1X1_SINGLE_CHIP_COLUMN, {2,  4608,    1,     FrameProcessor::DataType::raw_16bit, false,    32,  144, 1}},
             {XIDynMode::XIDYN_1X1_SINGLE_CHIP,   {8,       6912,    1,     FrameProcessor::DataType::raw_16bit, false,    192, 144, 1}},
             {XIDynMode::XIDYN_2X2_SINGLE_COLUMN, {9,       8192,    1,     FrameProcessor::DataType::raw_16bit, true,     128, 288, 1}},
             {XIDynMode::XIDYN_2X2_DOUBLE_COLUMN, {18,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,     256, 288, 2}},
             {XIDynMode::XIDYN_2X2_TRIPLE_COLUMN, {27,      8192,    1,     FrameProcessor::DataType::raw_16bit, true,     384, 288, 3}},
-            {XIDynMode::XIDYN_2X2_32_BIT,        {54,      8192,    1,     FrameProcessor::DataType::raw_32bit, true,     384, 288, 3}}
+            {XIDynMode::XIDYN_2X2_32_BIT,        {54,      8192,    1,     FrameProcessor::DataType::raw_32bit, true,     384, 288, 3}},
+            {XIDynMode::XIDYN_2X2_32_BIT_PG,     {54,      4096,    1,     FrameProcessor::DataType::raw_16bit, false,    768, 288, 6}},
+            {XIDynMode::XIDYN_2X2_TRIPLE_ROW,    {36,      6144,    1,     FrameProcessor::DataType::raw_16bit, false,    384, 288, 3}}
         };
         return mode_configs;
     }
@@ -520,6 +532,7 @@ private:
                                 (packet * mode_config_.columns * (pixels_per_packet / 2)) +
                                 ((row / 2) * (pixels_per_row * mode_config_.columns))
                                 + (frame * get_frame_data_size());
+
                             for (int pixel = 0; pixel < pixels_per_row; pixel++)
                             {
                                 uint16_t lower_16_bit = input_memory_row[pixel];

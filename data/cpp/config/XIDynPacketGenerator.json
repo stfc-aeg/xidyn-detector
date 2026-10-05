@@ -24,7 +24,7 @@
     },
     {
         "XIDyn": {
-            "mode": "2x2_triple_column",
+            "mode": "2x2_triple_row",
             "update_config": false,
             "dpdk_process_rank": 0,
             "num_secondary_processes": 0,
@@ -40,7 +40,7 @@
                     "core_name": "PacketGeneratorCore",
                     "num_cores": 1,
                     "stream": "primary",
-                    "mode": "2x2_triple_column",
+                    "mode": "2x2_triple_row",
                     "destination_port": 1234,
                     "source_port": 2345,
                     "source_ip_address": [
@@ -69,18 +69,19 @@
                         "0000:2a:00.0",
                         "0000:2a:00.1"
                     ],
-
-                    "data_source": "generated",
-                    "pattern": "packetnum",
-                    "file_path": "/aeg_sw/work/users/mux12756/develop/projects/h5-files/16-bit-test-3_000000.h5",
-                    "dataset_name": "/dummy",
+                    "data_source_config": {
+                        "data_source": "generated",
+                        "pattern": "packetnum",
+                        "file_path": "/aeg_sw/work/users/mux12756/develop/projects/h5-files/16-bit-test-3_000000.h5",
+                        "dataset_name": "/dummy"
+                    },
                     "packet_drop": 0
                 },
                 "packet_tx": {
                     "core_name": "PacketTxCore",
                     "num_cores": 1,
                     "stream": "primary",
-                    "mode": "2x2_triple_column",
+                    "mode": "2x2_triple_row",
                     "connect": "packet_generator",
                     "num_devices": 3,
                     "destination_port": 1234
